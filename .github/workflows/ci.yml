@@ -2,12 +2,8 @@ name: CI
 
 on:
   push:
-    branches:
+    branches-ignore:
       - main
-      - "ci/**"
-      - "feat/**"
-      - "fix/**"
-      - "test/**"
 
   pull_request:
     branches:
