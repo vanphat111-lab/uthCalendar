@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "ci/**"
+      - "feat/**"
+      - "fix/**"
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  python-check:
+    name: Python checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check Python syntax
+        run: python -m compileall -q source
+
+
+  compose-check:
+    name: Docker Compose validation
+    runs-on: ubuntu-latest
+
+    env:
+      TELE_TOKEN: ci_dummy_token
+      ADMIN_ID: "0"
+
+      DB_HOST: uth_db
+      DB_NAME: uth_calendar
+      DB_USER: uth_calendar
+      DB_PASS: ci_dummy_password
+
+      ENCRYPTION_KEY: ci_dummy_key
+      WEATHER_API_KEY: ci_dummy_weather_key
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+
+
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Build Docker image
+        run: docker build -t uth-calendar:ci .
