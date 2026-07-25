@@ -74,3 +74,124 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t uth-calendar:ci .
+
+
+  notify:
+    name: Telegram notification
+    runs-on: ubuntu-latest
+
+    needs:
+      - python-check
+      - compose-check
+      - docker-build
+
+    if: always()
+
+    steps:
+      - name: Notify CI result
+        env:
+          BOT_TOKEN: ${{ secrets.CI_TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CI_TELEGRAM_CHAT_ID }}
+
+          PYTHON_RESULT: ${{ needs.python-check.result }}
+          COMPOSE_RESULT: ${{ needs.compose-check.result }}
+          DOCKER_RESULT: ${{ needs.docker-build.result }}
+
+        run: |
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          COMMIT_SHORT="${GITHUB_SHA::7}"
+
+          if [ "$PYTHON_RESULT" = "success" ] && \
+             [ "$COMPOSE_RESULT" = "success" ] && \
+             [ "$DOCKER_RESULT" = "success" ]; then
+
+            STATUS="✅ CI PASSED"
+
+            if [ "$GITHUB_REF_NAME" != "main" ]; then
+              PR_URL="https://github.com/${GITHUB_REPOSITORY}/compare/main...${GITHUB_REF_NAME}?expand=1"
+
+              curl -sS \
+                -X POST \
+                "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                --data-urlencode "chat_id=${CHAT_ID}" \
+                --data-urlencode "text=${STATUS}
+
+          📦 ${GITHUB_REPOSITORY}
+          🌿 Branch: ${GITHUB_REF_NAME}
+          🔖 Commit: ${COMMIT_SHORT}
+
+          Python: ${PYTHON_RESULT}
+          Compose: ${COMPOSE_RESULT}
+          Docker: ${DOCKER_RESULT}" \
+                --data-urlencode "reply_markup={
+                  \"inline_keyboard\": [
+                    [
+                      {
+                        \"text\": \"🔀 Create Pull Request\",
+                        \"url\": \"${PR_URL}\"
+                      }
+                    ],
+                    [
+                      {
+                        \"text\": \"📋 View CI Run\",
+                        \"url\": \"${RUN_URL}\"
+                      }
+                    ]
+                  ]
+                }"
+
+            else
+
+              curl -sS \
+                -X POST \
+                "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                --data-urlencode "chat_id=${CHAT_ID}" \
+                --data-urlencode "text=${STATUS}
+
+          📦 ${GITHUB_REPOSITORY}
+          🌿 Branch: main
+          🔖 Commit: ${COMMIT_SHORT}
+
+          Python: ${PYTHON_RESULT}
+          Compose: ${COMPOSE_RESULT}
+          Docker: ${DOCKER_RESULT}" \
+                --data-urlencode "reply_markup={
+                  \"inline_keyboard\": [
+                    [
+                      {
+                        \"text\": \"📋 View CI Run\",
+                        \"url\": \"${RUN_URL}\"
+                      }
+                    ]
+                  ]
+                }"
+
+            fi
+
+          else
+
+            curl -sS \
+              -X POST \
+              "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${CHAT_ID}" \
+              --data-urlencode "text=❌ CI FAILED
+
+          📦 ${GITHUB_REPOSITORY}
+          🌿 Branch: ${GITHUB_REF_NAME}
+          🔖 Commit: ${COMMIT_SHORT}
+
+          Python: ${PYTHON_RESULT}
+          Compose: ${COMPOSE_RESULT}
+          Docker: ${DOCKER_RESULT}" \
+              --data-urlencode "reply_markup={
+                \"inline_keyboard\": [
+                  [
+                    {
+                      \"text\": \"🔴 View Failed Run\",
+                      \"url\": \"${RUN_URL}\"
+                    }
+                  ]
+                ]
+              }"
+
+          fi
