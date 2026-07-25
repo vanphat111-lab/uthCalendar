@@ -253,7 +253,7 @@ def scanAllDeadlines(bot, chatId, isManual=False, startDate=None, numDays=7):
     if messages is None:
         bot.send_message(chatId, "❌ Không thể lấy danh sách deadline.")
         return False
-
+srsrsrsr
             
     if len(messages) == 0:
         if isManual:
