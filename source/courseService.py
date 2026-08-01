@@ -10,6 +10,29 @@ import utils
 import re
 import redisManager
 
+MOODLE_SYSTEMS = {
+    "course": {
+        "base_url": "https://courses.ut.edu.vn",
+        "session_key": "course",
+        "display_name": "Courses",
+    },
+    "thnn": {
+        "base_url": "https://thnn.ut.edu.vn",
+        "session_key": "thnn",
+        "display_name": "THNN",
+    },
+}
+
+
+def getMoodleSystem(system="course"):
+    if system not in MOODLE_SYSTEMS:
+        supported = ", ".join(MOODLE_SYSTEMS)
+        raise ValueError(
+            f"Hệ thống Moodle không hợp lệ: {system}. Hỗ trợ: {supported}"
+        )
+
+    return MOODLE_SYSTEMS[system]
+
 # courseSession = requests.Session(impersonate="chrome110")
 
 def rebuildSession(cookieDict):
@@ -17,26 +40,32 @@ def rebuildSession(cookieDict):
     session.cookies.update(cookieDict)
     return session
 
-def getValidCourseSession(chatId, rawUser, rawPass):
-    cached = redisManager.getSession(chatId, 'course')
-    if cached:
-        return cached['cookies'], cached['sesskey']
+def getValidCourseSession(chatId, rawUser, rawPass, system="course"):
+    config = getMoodleSystem(system)
+    sessionKey = config["session_key"]
 
-    session, sesskey = fetchMoodleSession(rawUser, rawPass) 
-    
+    cached = redisManager.getSession(chatId, sessionKey)
+    if cached:
+        return cached["cookies"], cached["sesskey"]
+
+    session, sesskey = fetchMoodleSession(rawUser, rawPass, system=system)
+
     if session and sesskey:
         data = {
             "sesskey": sesskey,
-            "cookies": session
+            "cookies": session,
         }
-        redisManager.saveSession(chatId, 'course', data)
-        
+        redisManager.saveSession(chatId, sessionKey, data)
+
     return session, sesskey
 
-def fetchMoodleSession(username, password):
+def fetchMoodleSession(username, password, system="course"):
+    config = getMoodleSystem(system)
+    baseUrl = config["base_url"]
+    displayName = config["display_name"]
     with requests.Session(impersonate="chrome") as s:
         try:
-            loginUrl = f"https://courses.ut.edu.vn/login/index.php"
+            loginUrl = f"{baseUrl}/login/index.php"
 
             loginPage = s.get(
                 loginUrl,
@@ -71,7 +100,7 @@ def fetchMoodleSession(username, password):
                     "password": password,
                 },
                 headers={
-                    "Origin": "https://courses.ut.edu.vn",
+                    "Origin": baseUrl,
                     "Referer": loginUrl,
                     "Accept": (
                         "text/html,application/xhtml+xml,"
@@ -87,13 +116,13 @@ def fetchMoodleSession(username, password):
                 "/login/index.php" in str(loginResponse.url)
                 or 'name="logintoken"' in loginResponse.text
             ):
-                utils.log("WARN", "Đăng nhập Moodle thất bại")
+                utils.log("WARN", f"Đăng nhập Moodle {displayName} thất bại")
                 return None, None
 
             coursePage = s.get(
-                "https://courses.ut.edu.vn/my/courses.php",
+                f"{baseUrl}/my/courses.php",
                 headers={
-                    "Referer": "https://courses.ut.edu.vn/my/",
+                    "Referer": f"{baseUrl}/my/",
                     "Accept": (
                         "text/html,application/xhtml+xml,"
                         "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
@@ -109,7 +138,7 @@ def fetchMoodleSession(username, password):
             )
 
             if not sesskeyMatch:
-                utils.log("ERROR", "Login được nhưng không thấy sesskey")
+                utils.log("ERROR", f"Login {displayName} được nhưng không thấy sesskey")
                 return None, None
 
             cookies = s.cookies.get_dict()
@@ -118,7 +147,7 @@ def fetchMoodleSession(username, password):
             return cookies, sesskey
 
         except Exception as e:
-            utils.log("ERROR", f"Lỗi login Moodle: {e}")
+            utils.log("ERROR", f"Lỗi login Moodle {displayName}: {e}")
             return None, None
 
 def prepareMonthlyPayload(startDate, numDays):
@@ -159,12 +188,22 @@ def prepareMonthlyPayload(startDate, numDays):
 
     return payload, now_ts, end_ts
 
-def getDeadlineMessages(chatId, cookieDict, sesskey, startDate=None, numDays=7):
+def getDeadlineMessages(
+    chatId,
+    cookieDict,
+    sesskey,
+    startDate=None,
+    numDays=7,
+    system="course",
+):
+    config = getMoodleSystem(system)
+    baseUrl = config["base_url"]
+    displayName = config["display_name"]
     if startDate is None:
         startDate = datetime.now()
         
     payload, startTs, endTs = prepareMonthlyPayload(startDate, numDays)
-    url = f"https://courses.ut.edu.vn/lib/ajax/service.php?sesskey={sesskey}"
+    url = f"{baseUrl}/lib/ajax/service.php?sesskey={sesskey}"
     
     with requests.Session(impersonate="chrome") as s:
         s.cookies.update(cookieDict)
@@ -180,11 +219,11 @@ def getDeadlineMessages(chatId, cookieDict, sesskey, startDate=None, numDays=7):
             try:
                 responses = r.json()
             except Exception:
-                utils.log("ERROR", f"Moodle Deadline: Server không trả về JSON. Mã HTTP: {r.status_code}. Nội dung: {r.text[:500]}")
+                utils.log("ERROR", f"Moodle {displayName} Deadline: Server không trả về JSON. Mã HTTP: {r.status_code}. Nội dung: {r.text[:500]}")
                 return None
 
             if responses and isinstance(responses, list) and responses[0].get('error'):
-                utils.log("WARN", f"Session Moodle của {chatId} đã hết hạn")
+                utils.log("WARN", f"Session Moodle {displayName} của {chatId} đã hết hạn")
                 return None
             
             allEvents = []
@@ -224,68 +263,139 @@ def getDeadlineMessages(chatId, cookieDict, sesskey, startDate=None, numDays=7):
             return msgList
 
         except Exception as e:
-            utils.log("ERROR", f"Lỗi lấy message deadline: {e}")
+            utils.log("ERROR", f"Lỗi lấy deadline {displayName}: {e}")
         return None
 
-def scanAllDeadlines(bot, chatId, isManual=False, startDate=None, numDays=7):
-    u = db.getUserCredentials(chatId)
-    if not u: return False
+def scanAllDeadlines(
+    bot,
+    chatId,
+    isManual=False,
+    startDate=None,
+    numDays=7,
+    system="course",
+):
+    config = getMoodleSystem(system)
+    sessionKey = config["session_key"]
+    displayName = config["display_name"]
 
-    rawUser = utils.decryptData(u['uth_user'])
-    rawPass = utils.decryptData(u['uth_pass'])
-    
-    session, sesskey = getValidCourseSession(chatId, rawUser, rawPass)
-    
-    if not session or not sesskey:
-        if isManual: bot.send_message(chatId, "❌ Không thể kết nối hệ thống Courses.")
+    u = db.getUserCredentials(chatId)
+    if not u:
         return False
 
-    messages = getDeadlineMessages(chatId, session, sesskey, startDate=startDate, numDays=numDays)
+    rawUser = utils.decryptData(u["uth_user"])
+    rawPass = utils.decryptData(u["uth_pass"])
+
+    session, sesskey = getValidCourseSession(
+        chatId,
+        rawUser,
+        rawPass,
+        system=system,
+    )
+
+    if not session or not sesskey:
+        if isManual:
+            bot.send_message(
+                chatId,
+                f"❌ Không thể kết nối hệ thống {displayName}.",
+            )
+        return False
+
+    messages = getDeadlineMessages(
+        chatId,
+        session,
+        sesskey,
+        startDate=startDate,
+        numDays=numDays,
+        system=system,
+    )
 
     if messages is None:
-        utils.log("INFO", f"Đang làm mới sesskey cho {chatId}")
-        redisManager.deleteSession(chatId, 'course')
-        session, sesskey = fetchMoodleSession(rawUser, rawPass)
+        utils.log(
+            "INFO",
+            f"Đang làm mới sesskey {displayName} cho {chatId}",
+        )
+        redisManager.deleteSession(chatId, sessionKey)
+
+        session, sesskey = fetchMoodleSession(
+            rawUser,
+            rawPass,
+            system=system,
+        )
+
         if session and sesskey:
             data = {
                 "sesskey": sesskey,
-                "cookies": session
-                }
-            redisManager.saveSession(chatId, 'course', data)
-            messages = getDeadlineMessages(chatId, session, sesskey, startDate=startDate, numDays=numDays)
+                "cookies": session,
+            }
+            redisManager.saveSession(chatId, sessionKey, data)
+            messages = getDeadlineMessages(
+                chatId,
+                session,
+                sesskey,
+                startDate=startDate,
+                numDays=numDays,
+                system=system,
+            )
 
     if messages is None:
-        bot.send_message(chatId, "❌ Không thể lấy danh sách deadline.")
+        bot.send_message(
+            chatId,
+            f"❌ Không thể lấy danh sách deadline từ {displayName}.",
+        )
         return False
 
-            
     if len(messages) == 0:
         if isManual:
-            bot.send_message(chatId, "🎉 <b>Tuyệt vời!</b>\nBạn không có deadline nào trong khoảng thời gian này. Nghỉ ngơi thôi!", parse_mode="HTML")
+            bot.send_message(
+                chatId,
+                (
+                    "🎉 <b>Tuyệt vời!</b>\n"
+                    f"Bạn không có deadline nào trên {displayName} "
+                    "trong khoảng thời gian này. Nghỉ ngơi thôi!"
+                ),
+                parse_mode="HTML",
+            )
         return True
 
     rangeStart = startDate if startDate else datetime.now()
     rangeEnd = rangeStart + timedelta(days=numDays)
 
-    startStr = rangeStart.strftime('%d/%m/%Y')
-    endStr = rangeEnd.strftime('%d/%m/%Y')
+    startStr = rangeStart.strftime("%d/%m/%Y")
+    endStr = rangeEnd.strftime("%d/%m/%Y")
 
     if isManual:
-        header = "🔍 <b>DANH SÁCH DEADLINE</b>\n"
+        header = f"🔍 <b>DANH SÁCH DEADLINE {displayName.upper()}</b>\n"
     else:
-        header = "🚀 <b>THÔNG BÁO DEADLINE TỰ ĐỘNG</b>\n"
+        header = (
+            f"🚀 <b>THÔNG BÁO DEADLINE TỰ ĐỘNG "
+            f"{displayName.upper()}</b>\n"
+        )
 
     header += f"📅 <i>Thời gian: từ {startStr} đến {endStr}</i>\n"
-    header += f"✍️ Tìm thấy <b>{len(messages)}</b> sự kiện trong khoảng thời gian này.\n"
+    header += (
+        f"✍️ Tìm thấy <b>{len(messages)}</b> sự kiện "
+        "trong khoảng thời gian này.\n"
+    )
     header += "━━━━━━━━━━━━━━━━━━"
-    
+
     bot.send_message(chatId, header, parse_mode="HTML")
 
     from telebot import types
     for m in messages:
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton(m['btnText'], callback_data=m['callback']))
-        bot.send_message(chatId, m['text'], parse_mode="HTML", reply_markup=markup, disable_web_page_preview=True)
+        markup.add(
+            types.InlineKeyboardButton(
+                m["btnText"],
+                callback_data=m["callback"],
+            )
+        )
+        bot.send_message(
+            chatId,
+            m["text"],
+            parse_mode="HTML",
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
         time.sleep(0.3)
     return True
 
