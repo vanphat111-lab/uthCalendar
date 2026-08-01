@@ -1,5 +1,6 @@
-# Copyright (c) 2026 vanphat111 <phathovan14122006@email.com> | All rights reserved
-# celery.py
+# Copyright (C) 2026 vanphat111 <phathovan14122006@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+# celeryApp.py
 
 from celery import Celery
 from celery.schedules import crontab

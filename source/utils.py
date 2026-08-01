@@ -1,4 +1,5 @@
-# Copyright (c) 2026 vanphat111 <phathovan14122006@email.com> | All rights reserved
+# Copyright (C) 2026 vanphat111 <phathovan14122006@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
 # utils.py
 
 import os

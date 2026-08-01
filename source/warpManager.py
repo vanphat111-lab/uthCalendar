@@ -1,3 +1,7 @@
+# Copyright (C) 2026 vanphat111 <phathovan14122006@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+# warpManager.py
+
 import docker
 import time
 from utils import log
