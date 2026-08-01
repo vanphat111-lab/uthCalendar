@@ -34,6 +34,7 @@ def runScheduler():
     schedule.every().day.at("05:00").do(cronService.autoCheckAndNotify, bot)
     schedule.every().day.at("12:00").do(cronService.autoCheckAndNotify, bot)
     schedule.every().day.at("17:00").do(cronService.autoCheckAndNotify, bot)
+    schedule.every().day.at("19:00").do(cronService.autoCheckAndNotify, bot, 1)
     schedule.every().monday.at("19:00").do(cronService.autoScanAllUsers, bot)
     while True:
         schedule.run_pending()
