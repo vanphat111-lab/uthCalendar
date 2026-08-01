@@ -1,3 +1,7 @@
+# Copyright (C) 2026 vanphat111 <phathovan14122006@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+# courseService.py
+
 from curl_cffi import requests
 import time
 from datetime import datetime, timedelta
