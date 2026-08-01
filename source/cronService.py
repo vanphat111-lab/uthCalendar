@@ -7,8 +7,13 @@ import traceback
 import database as db
 from utils import log
 import task
+from datetime import datetime, timedelta
 
-def autoCheckAndNotify(bot):
+
+def autoCheckAndNotify(bot, dayOffset=0):
+    targetDate = datetime.now() + timedelta(days=dayOffset)
+    dateStr = targetDate.strftime("%d/%m/%Y")
+
     log("CRON", "Bắt đầu chu kỳ quét Portal")
     try:
         users = db.getUsersForPortalNotify()
@@ -16,10 +21,10 @@ def autoCheckAndNotify(bot):
             log("CRON", "Không có user nào cần quét Portal")
             return
 
-        today = time.strftime("%d/%m/%Y")
+        # today = time.strftime("%d/%m/%Y")
         for chat_id in users:
             try:
-                task.periodicPortalTask.delay(chat_id, today)
+                task.periodicPortalTask.delay(chat_id, dateStr)
                 log("CRON", f"Đã đẩy task Portal cho user: {chat_id}")
             except Exception:
                 log("ERROR", f"Lỗi đẩy task cho {chat_id}: {traceback.format_exc()}")
