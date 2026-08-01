@@ -48,7 +48,7 @@ def portalTask(self, chatId, dateStr):
 def deadlineTask(self, chatId):
     sendWorkerCheckIn(self, chatId)
     try:
-        courseService.scanAllDeadlines(bot, chatId, isManual=True)
+        courseService.scanAllMoodleDeadlines(bot, chatId, isManual=True)
     except Exception as e:
         log("ERROR", f"Lỗi Deadline Task cho {chatId}: {e}")
 
@@ -74,7 +74,7 @@ def feedbackTask(self, chatId, text, adminId):
 def customDeadlineTask(self, chatId, startDateStr, numDays):
     sendWorkerCheckIn(self, chatId)
     startDate = datetime.strptime(startDateStr, "%d/%m/%Y")
-    courseService.scanAllDeadlines(bot, chatId, isManual=True, startDate=startDate, numDays=numDays)
+    courseService.scanAllMoodleDeadlines(bot, chatId, isManual=True, startDate=startDate, numDays=numDays)
 
 @app.task(bind=True, name="tasks.portalWeekTask", queue='high_priority')
 def portalWeekTask(self, chatId, startDateStr):
@@ -134,7 +134,7 @@ def periodicCourseTask(self, chatId):
     sendWorkerCheckIn(self, chatId)
 
     log("WORKER", f"Đang quét deadline cho user: {chatId}")
-    courseService.scanAllDeadlines(bot, chatId, isManual=False)
+    courseService.scanAllMoodleDeadlines(bot, chatId, isManual=False)
 
 
 @app.task(
