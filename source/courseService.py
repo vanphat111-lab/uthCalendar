@@ -54,7 +54,7 @@ def getValidCourseSession(chatId, rawUser, rawPass, system="course"):
         data = {
             "sesskey": sesskey,
             "cookies": session,
-        }
+            }
         redisManager.saveSession(chatId, sessionKey, data)
 
     return session, sesskey
@@ -398,6 +398,47 @@ def scanAllDeadlines(
         )
         time.sleep(0.3)
     return True
+
+def scanAllMoodleDeadlines(
+    bot,
+    chatId,
+    isManual=False,
+    startDate=None,
+    numDays=7,
+):
+    """
+    Quét deadline của toàn bộ hệ thống Moodle.
+
+    Mỗi hệ thống gửi một nhóm tin nhắn riêng:
+    - Courses
+    - THNN
+
+    Một hệ thống lỗi không làm dừng hệ thống còn lại.
+    """
+    results = {}
+
+    for system in ("course", "thnn"):
+        config = getMoodleSystem(system)
+        displayName = config["display_name"]
+
+        try:
+            results[system] = scanAllDeadlines(
+                bot=bot,
+                chatId=chatId,
+                isManual=isManual,
+                startDate=startDate,
+                numDays=numDays,
+                system=system,
+            )
+        except Exception as e:
+            results[system] = False
+
+            utils.log("ERROR", f"Lỗi quét deadline {displayName} của {chatId}: {e}")
+            bot.send_message(chatId, f"❌ Không thể quét deadline từ hệ thống {displayName}.")
+
+        time.sleep(0.5)
+
+    return results
 
 def getEventIcon(eventType):
     icons = {'assign': '📝', 'quiz': '✍️', 'course': '📚', 'site': '🌐'}
