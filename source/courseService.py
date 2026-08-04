@@ -280,6 +280,8 @@ def scanAllDeadlines(
 
     u = db.getUserCredentials(chatId)
     if not u:
+        utils.log("WARN", f"Không tìm thấy thông tin user {chatId} khi quét {displayName}")
+        bot.send_message(chatId,"❌ Bạn chưa đăng ký tài khoản. Hãy dùng /login trước.", parse_mode="HTML")
         return False
 
     rawUser = utils.decryptData(u["uth_user"])
@@ -293,11 +295,8 @@ def scanAllDeadlines(
     )
 
     if not session or not sesskey:
-        if isManual:
-            bot.send_message(
-                chatId,
-                f"❌ Không thể kết nối hệ thống {displayName}.",
-            )
+        utils.log("WARN", f"Không thể lấy session Moodle {displayName} cho {chatId}")
+        bot.send_message(chatId, f"❌ Không thể kết nối hệ thống {displayName}.")
         return False
 
     messages = getDeadlineMessages(
@@ -338,23 +337,19 @@ def scanAllDeadlines(
             )
 
     if messages is None:
-        bot.send_message(
-            chatId,
-            f"❌ Không thể lấy danh sách deadline từ {displayName}.",
-        )
+        bot.send_message(chatId, f"❌ Không thể lấy danh sách deadline từ {displayName}.")
         return False
 
     if len(messages) == 0:
-        if isManual:
-            bot.send_message(
-                chatId,
-                (
-                    "🎉 <b>Tuyệt vời!</b>\n"
-                    f"Bạn không có deadline nào trên {displayName} "
-                    "trong khoảng thời gian này. Nghỉ ngơi thôi!"
-                ),
-                parse_mode="HTML",
-            )
+        bot.send_message(
+            chatId,
+            (
+                "🎉 <b>Tuyệt vời!</b>\n"
+                f"Bạn không có deadline nào trên {displayName} "
+                "trong khoảng thời gian này. Nghỉ ngơi thôi!"
+            ),
+            parse_mode="HTML",
+        )
         return True
 
     rangeStart = startDate if startDate else datetime.now()
