@@ -53,3 +53,24 @@ def loginAndSaveToken(chatId, user, password):
     except Exception as e:
         log("ERROR", f"Lỗi nghiêm trọng trong loginAndSaveToken: {e}")
         return None
+
+def delete_all_user_data(chat_id):
+    chat_id = str(chat_id)
+    keys = [
+        f"auth:portal:{chat_id}",
+        f"auth:course:{chat_id}",
+        f"auth:thnn:{chat_id}",
+        f"spam:ban:{chat_id}",
+        f"spam:cnt_min:{chat_id}",
+        f"spam:cnt_hour:{chat_id}",
+        f"spam:cnt_day:{chat_id}",
+        f"spam:vios:{chat_id}",
+    ]
+
+    try:
+        deleted = redisClient.delete(*keys)
+        log("REDIS", f"Đã xóa {deleted} key của user {chat_id}")
+        return True
+    except Exception as exc:
+        log("ERROR", f"Không thể xóa Redis của user {chat_id}: {exc}")
+        return False

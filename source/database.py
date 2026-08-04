@@ -216,6 +216,61 @@ def initDb() -> bool:
 
                 cursor.execute(
                     """
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS last_retention_confirmed_at
+                    TIMESTAMP
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS retention_requested_at
+                    TIMESTAMP
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET last_retention_confirmed_at = COALESCE(
+                        last_retention_confirmed_at,
+                        created_at,
+                        CURRENT_TIMESTAMP
+                    )
+                    WHERE last_retention_confirmed_at IS NULL
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    ALTER TABLE users
+                    ALTER COLUMN last_retention_confirmed_at
+                    SET DEFAULT CURRENT_TIMESTAMP
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    ALTER TABLE users
+                    ALTER COLUMN last_retention_confirmed_at
+                    SET NOT NULL
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_deletion_logs (
+                        id BIGSERIAL PRIMARY KEY,
+                        chat_id TEXT NOT NULL,
+                        reason TEXT NOT NULL,
+                        deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS completed_tasks (
                         id SERIAL PRIMARY KEY,
                         chat_id TEXT NOT NULL,
@@ -249,6 +304,33 @@ def initDb() -> bool:
                     idx_users_notify_deadline
                     ON users (notify_deadline)
                     WHERE notify_deadline = TRUE
+                    """
+                )
+
+
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_users_retention_due
+                    ON users (last_retention_confirmed_at)
+                    WHERE retention_requested_at IS NULL
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_users_retention_pending
+                    ON users (retention_requested_at)
+                    WHERE retention_requested_at IS NOT NULL
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_user_deletion_logs_deleted_at
+                    ON user_deletion_logs (deleted_at)
                     """
                 )
 
@@ -363,7 +445,9 @@ def getUserCredentials(chatId: int | str) -> dict[str, Any] | None:
                 uth_pass,
                 notify_enabled,
                 notify_deadline,
-                created_at
+                created_at,
+                last_retention_confirmed_at,
+                retention_requested_at
             FROM users
             WHERE chat_id = %s
             """,
@@ -391,7 +475,9 @@ def upsertUserCredentials(chatId: int | str, encryptedUser: str, encryptedPasswo
             ON CONFLICT (chat_id)
             DO UPDATE SET
                 uth_user = EXCLUDED.uth_user,
-                uth_pass = EXCLUDED.uth_pass
+                uth_pass = EXCLUDED.uth_pass,
+                last_retention_confirmed_at = CURRENT_TIMESTAMP,
+                retention_requested_at = NULL
             """,
             (
                 str(chatId),
@@ -535,3 +621,152 @@ def countUsers() -> int:
     except Exception as exc:
         log("ERROR", f"Lỗi đếm số user: {exc}")
         return 0
+
+# ==========================================================
+# User retention
+# ==========================================================
+
+def get_users_due_for_retention_check() -> list[str]:
+    """Return users due after 30 days and without a pending request."""
+    try:
+        rows = fetchAll(
+            """
+            SELECT chat_id
+            FROM users
+            WHERE retention_requested_at IS NULL
+              AND last_retention_confirmed_at
+                  <= CURRENT_TIMESTAMP - INTERVAL '30 days'
+            ORDER BY last_retention_confirmed_at ASC
+            """
+        )
+        return [row[0] for row in rows]
+    except Exception as exc:
+        log("ERROR", f"Lỗi lấy user đến hạn retention: {exc}")
+        return []
+
+
+def get_all_users_without_pending_retention() -> list[str]:
+    """Return all users who do not already have a pending request."""
+    try:
+        rows = fetchAll(
+            """
+            SELECT chat_id
+            FROM users
+            WHERE retention_requested_at IS NULL
+            ORDER BY created_at ASC
+            """
+        )
+        return [row[0] for row in rows]
+    except Exception as exc:
+        log("ERROR", f"Lỗi lấy toàn bộ user cho retention: {exc}")
+        return []
+
+
+def mark_retention_requested(chat_id: int | str, requested_at: int) -> bool:
+    """Mark a request only when the user has no pending request."""
+    try:
+        affected_rows = execute(
+            """
+            UPDATE users
+            SET retention_requested_at = TO_TIMESTAMP(%s)
+            WHERE chat_id = %s
+              AND retention_requested_at IS NULL
+            """,
+            (int(requested_at), str(chat_id)),
+        )
+        return affected_rows > 0
+    except Exception as exc:
+        log("ERROR", f"Lỗi đánh dấu retention cho {chat_id}: {exc}")
+        return False
+
+
+def confirm_user_retention(chat_id: int | str, requested_at: int) -> bool:
+    """Confirm only the currently pending request, rejecting stale buttons."""
+    try:
+        affected_rows = execute(
+            """
+            UPDATE users
+            SET last_retention_confirmed_at = CURRENT_TIMESTAMP,
+                retention_requested_at = NULL
+            WHERE chat_id = %s
+              AND EXTRACT(EPOCH FROM retention_requested_at)::BIGINT = %s
+            """,
+            (str(chat_id), int(requested_at)),
+        )
+        return affected_rows > 0
+    except Exception as exc:
+        log("ERROR", f"Lỗi xác nhận retention cho {chat_id}: {exc}")
+        return False
+
+
+def has_pending_retention_request(
+    chat_id: int | str,
+    requested_at: int,
+) -> bool:
+    """Check that a callback belongs to the active request."""
+    try:
+        row = fetchOne(
+            """
+            SELECT 1
+            FROM users
+            WHERE chat_id = %s
+              AND EXTRACT(EPOCH FROM retention_requested_at)::BIGINT = %s
+            """,
+            (str(chat_id), int(requested_at)),
+        )
+        return row is not None
+    except Exception as exc:
+        log("ERROR", f"Lỗi kiểm tra retention của {chat_id}: {exc}")
+        return False
+
+
+def get_expired_retention_requests() -> list[str]:
+    """Return requests that have received no response for at least 48 hours."""
+    try:
+        rows = fetchAll(
+            """
+            SELECT chat_id
+            FROM users
+            WHERE retention_requested_at IS NOT NULL
+              AND retention_requested_at
+                  <= CURRENT_TIMESTAMP - INTERVAL '48 hours'
+            ORDER BY retention_requested_at ASC
+            """
+        )
+        return [row[0] for row in rows]
+    except Exception as exc:
+        log("ERROR", f"Lỗi lấy retention hết hạn: {exc}")
+        return []
+
+
+def delete_user_completely(chat_id: int | str, reason: str) -> bool:
+    """Delete all PostgreSQL data for a user in one transaction."""
+    try:
+        with transaction() as (_, cursor):
+            cursor.execute(
+                "SELECT 1 FROM users WHERE chat_id = %s FOR UPDATE",
+                (str(chat_id),),
+            )
+            if cursor.fetchone() is None:
+                return False
+
+            cursor.execute(
+                """
+                INSERT INTO user_deletion_logs (chat_id, reason)
+                VALUES (%s, %s)
+                """,
+                (str(chat_id), reason),
+            )
+            cursor.execute(
+                "DELETE FROM completed_tasks WHERE chat_id = %s",
+                (str(chat_id),),
+            )
+            cursor.execute(
+                "DELETE FROM users WHERE chat_id = %s",
+                (str(chat_id),),
+            )
+
+        return True
+    except Exception as exc:
+        log("ERROR", f"Lỗi xóa toàn bộ user {chat_id}: {exc}")
+        return False

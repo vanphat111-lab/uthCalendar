@@ -14,6 +14,7 @@ import json
 import redisManager
 import utils
 import payosService
+import retention_service
 from telebot import types
 import urllib.parse
 
@@ -150,6 +151,28 @@ def periodicPortalTask(self, chatId, dateStr):
     msg = portalService.formatCalendarMessage(chatId, dateStr, isAuto=True)
     if msg:
         bot.send_message(chatId, msg, parse_mode="HTML", disable_web_page_preview=True)
+
+@app.task(
+    name="tasks.retentionMaintenanceTask",
+    queue="low_priority",
+)
+def retention_maintenance_task():
+    log("RETENTION", "Bắt đầu retention maintenance hằng ngày")
+    return retention_service.run_maintenance(bot)
+
+
+@app.task(
+    name="tasks.retentionRequestAllTask",
+    queue="low_priority",
+)
+def retention_request_all_task(requested_by):
+    log("RETENTION", f"Admin {requested_by} yêu cầu xác nhận toàn bộ user")
+    return retention_service.send_retention_requests(
+        bot,
+        mode="all",
+        requested_by=requested_by,
+    )
+
 
 @app.task(
     name='tasks.updateWeatherTask',
