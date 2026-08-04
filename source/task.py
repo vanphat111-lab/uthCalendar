@@ -15,6 +15,7 @@ import redisManager
 import utils
 import payosService
 import retention_service
+import database as db
 from telebot import types
 import urllib.parse
 
@@ -166,6 +167,9 @@ def retention_maintenance_task():
     queue="low_priority",
 )
 def retention_request_all_task(requested_by):
+    if not _ensure_admin_task(requested_by):
+        return {"authorized": False}
+
     log("RETENTION", f"Admin {requested_by} yêu cầu xác nhận toàn bộ user")
     return retention_service.send_retention_requests(
         bot,
@@ -276,3 +280,159 @@ def checkPaymentTask(self, chatId, username, orderCode):
 
         log("INFO", f"[{current_attempt}/{max_retries}] Đang chờ đơn hàng {orderCode} thanh toán... Thử lại sau 10 giây.")
         self.retry(exc=exc, countdown=10, max_retries=max_retries)
+# ==========================================
+# 3. TASK ADMIN
+# ==========================================
+
+
+def _ensure_admin_task(requested_by):
+    import admin_security
+
+    if admin_security.is_admin(requested_by):
+        return True
+
+    log("WARN", f"Từ chối admin task từ chat_id không hợp lệ: {requested_by}")
+    return False
+
+
+@app.task(
+    name="tasks.adminBroadcastTask",
+    queue="low_priority",
+)
+def admin_broadcast_task(requested_by, content):
+    if not _ensure_admin_task(requested_by):
+        return {"authorized": False}
+
+    user_ids = db.getAllUserIds()
+    report = {
+        "selected": len(user_ids),
+        "sent": 0,
+        "failed": 0,
+    }
+
+    for chat_id in user_ids:
+        try:
+            bot.send_message(
+                chat_id,
+                f"📢 <b>THÔNG BÁO MỚI</b>\n\n{content}\n\n<i>Chúc bạn học tốt!</i>",
+                parse_mode="HTML",
+            )
+            report["sent"] += 1
+        except Exception as exc:
+            report["failed"] += 1
+            log("WARN", f"Không thể gửi broadcast cho user {chat_id}: {exc}")
+
+        import time
+        time.sleep(0.3)
+
+    bot.send_message(
+        requested_by,
+        (
+            "✅ <b>HOÀN TẤT BROADCAST</b>\n\n"
+            f"👥 Tổng user: {report['selected']}\n"
+            f"📨 Gửi thành công: {report['sent']}\n"
+            f"⚠️ Gửi thất bại: {report['failed']}"
+        ),
+        parse_mode="HTML",
+    )
+    return report
+
+
+@app.task(
+    name="tasks.adminRetentionCleanupTask",
+    queue="low_priority",
+)
+def admin_retention_cleanup_task(requested_by):
+    if not _ensure_admin_task(requested_by):
+        return {"authorized": False}
+
+    report = retention_service.cleanup_expired_users(bot)
+    bot.send_message(
+        requested_by,
+        (
+            "✅ <b>HOÀN TẤT CLEANUP RETENTION</b>\n\n"
+            f"⌛ Đã quá hạn: {report['expired']}\n"
+            f"📨 Đã báo trước khi xóa: {report['notified']}\n"
+            f"🚫 Không thể liên hệ: {report['unreachable']}\n"
+            f"⚠️ Lỗi tạm thời: {report['temporary_errors']}\n"
+            f"🗑️ Đã xóa: {report['deleted']}"
+        ),
+        parse_mode="HTML",
+    )
+    return report
+
+
+@app.task(
+    name="tasks.adminRetentionMaintenanceTask",
+    queue="low_priority",
+)
+def admin_retention_maintenance_task(requested_by):
+    if not _ensure_admin_task(requested_by):
+        return {"authorized": False}
+
+    report = retention_service.run_maintenance(bot)
+    request_report = report["requests"]
+    cleanup_report = report["cleanup"]
+    bot.send_message(
+        requested_by,
+        (
+            "✅ <b>HOÀN TẤT RETENTION MAINTENANCE</b>\n\n"
+            f"📨 Yêu cầu mới đã gửi: {request_report['sent']}\n"
+            f"🚫 User không thể liên hệ: {request_report['unreachable']}\n"
+            f"🗑️ User đã xóa lúc gửi yêu cầu: {request_report['deleted']}\n\n"
+            f"⌛ Yêu cầu quá hạn: {cleanup_report['expired']}\n"
+            f"🗑️ User đã xóa khi cleanup: {cleanup_report['deleted']}\n"
+            f"⚠️ Lỗi tạm thời: {request_report['temporary_errors'] + cleanup_report['temporary_errors']}"
+        ),
+        parse_mode="HTML",
+    )
+    return report
+
+
+@app.task(
+    name="tasks.adminPortalScanTask",
+    queue="low_priority",
+)
+def admin_portal_scan_task(requested_by):
+    if not _ensure_admin_task(requested_by):
+        return {"authorized": False}
+
+    import cronService
+
+    cronService.autoCheckAndNotify(bot)
+    bot.send_message(
+        requested_by,
+        "✅ Đã đẩy toàn bộ tác vụ quét Portal vào hàng đợi.",
+    )
+    return {"authorized": True}
+
+
+@app.task(
+    name="tasks.adminDeadlineScanTask",
+    queue="low_priority",
+)
+def admin_deadline_scan_task(requested_by):
+    if not _ensure_admin_task(requested_by):
+        return {"authorized": False}
+
+    import cronService
+
+    cronService.autoScanAllUsers(bot)
+    bot.send_message(
+        requested_by,
+        "✅ Đã đẩy toàn bộ tác vụ quét deadline vào hàng đợi.",
+    )
+    return {"authorized": True}
+
+
+@app.task(
+    name="tasks.adminUpdateWeatherTask",
+    queue="low_priority",
+)
+def admin_update_weather_task(requested_by):
+    if not _ensure_admin_task(requested_by):
+        return {"authorized": False}
+
+    result = updateWeatherTask.run()
+    bot.send_message(requested_by, "✅ Đã hoàn tất cập nhật dữ liệu thời tiết.")
+    return result
