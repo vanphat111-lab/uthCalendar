@@ -18,6 +18,8 @@ services:
     environment:
       - WARP_SLEEP=2
       - LOG_LEVEL=info
+    devices:
+      - /dev/net/tun:/dev/net/tun
     volumes:
       - uth_warp_data:/var/lib/cloudflare-warp
     networks:
@@ -60,6 +62,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      - CELERY_BROKER_URL=redis://uth_redis:6379/0
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Ho_Chi_Minh
       - TELE_TOKEN=${TELE_TOKEN}
@@ -70,6 +73,9 @@ services:
       - DB_PASS=${DB_PASS}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - WEATHER_API_KEY=${WEATHER_API_KEY}
+      - PAYOS_CLIENT_ID=${PAYOS_CLIENT_ID}
+      - PAYOS_API_KEY=${PAYOS_API_KEY}
+      - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
       - WARP_PROXY_URL=socks5://uth_warp:1080
 
   # Worker VIP - Chỉ xử lý hàng ưu tiên
@@ -77,9 +83,7 @@ services:
     image: vanphat111/uth-calendar:latest
     hostname: VIP_Worker
     restart: unless-stopped
-    command: python -m celery -A task worker -Q high_priority --concurrency=1 --loglevel=info
-    deploy:
-      replicas: 2
+    command: python -m celery -A task worker -Q high_priority --concurrency=2 --loglevel=info
     networks:
       - uth-network
     volumes:
@@ -96,16 +100,18 @@ services:
       - DB_PASS=${DB_PASS}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - WEATHER_API_KEY=${WEATHER_API_KEY}
+      - PAYOS_CLIENT_ID=${PAYOS_CLIENT_ID}
+      - PAYOS_API_KEY=${PAYOS_API_KEY}
+      - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
       - WARP_PROXY_URL=socks5://uth_warp:1080
+      - ADMIN_ID=${ADMIN_ID}
 
   # Worker Low - Xử lý đa nhiệm
   worker_low:
     image: vanphat111/uth-calendar:latest
     hostname: Low_Worker
     restart: unless-stopped
-    command: python -m celery -A task worker -Q high_priority,low_priority --concurrency=1 --loglevel=info
-    deploy:
-      replicas: 3
+    command: python -m celery -A task worker -Q high_priority,low_priority --concurrency=3 --loglevel=info
     networks:
       - uth-network
     volumes:
@@ -122,7 +128,11 @@ services:
       - DB_PASS=${DB_PASS}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - WEATHER_API_KEY=${WEATHER_API_KEY}
+      - PAYOS_CLIENT_ID=${PAYOS_CLIENT_ID}
+      - PAYOS_API_KEY=${PAYOS_API_KEY}
+      - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
       - WARP_PROXY_URL=socks5://uth_warp:1080
+      - ADMIN_ID=${ADMIN_ID}
 
   # Celery Beat - Lập lịch định kỳ
   celery_beat:
