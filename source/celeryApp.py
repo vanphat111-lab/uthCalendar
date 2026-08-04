@@ -46,6 +46,12 @@ app.conf.update(
         'tasks.checkPaymentTask': {'queue': 'low_priority'},
         'tasks.retentionMaintenanceTask': {'queue': 'low_priority'},
         'tasks.retentionRequestAllTask': {'queue': 'low_priority'},
+        'tasks.adminBroadcastTask': {'queue': 'low_priority'},
+        'tasks.adminRetentionCleanupTask': {'queue': 'low_priority'},
+        'tasks.adminRetentionMaintenanceTask': {'queue': 'low_priority'},
+        'tasks.adminPortalScanTask': {'queue': 'low_priority'},
+        'tasks.adminDeadlineScanTask': {'queue': 'low_priority'},
+        'tasks.adminUpdateWeatherTask': {'queue': 'low_priority'},
     }
 )
 

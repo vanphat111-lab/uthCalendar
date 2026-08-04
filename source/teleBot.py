@@ -16,8 +16,10 @@ import cronService
 import task
 import rate_limit
 import retention_service
+import admin_handlers
+import admin_security
 
-adminId = utils.os.getenv("ADMIN_ID")
+adminId = admin_security.get_primary_admin_id()
 
 def mainMenu(chatId):
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
@@ -29,7 +31,7 @@ def mainMenu(chatId):
     else:
         markup.add("🛠️ Kiểm tra hệ thống")
 
-    if str(chatId) == str(adminId):
+    if admin_security.is_admin(chatId):
         btn_admin = types.KeyboardButton("⚙️ Admin Panel")
         markup.add(btn_admin)
     return markup
@@ -49,15 +51,6 @@ def courseSubMenu():
     markup.add("🏠 Quay lại menu chính")
     return markup
 
-def adminSubMenu():
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton("🔄 Test Quét Lịch (Portal)", callback_data="test_cron_portal"),
-        types.InlineKeyboardButton("📅 Test Quét Deadline (Course)", callback_data="test_cron_deadline"),
-        types.InlineKeyboardButton("📨 Yêu cầu tất cả user xác nhận", callback_data="retention_admin_all"),
-        types.InlineKeyboardButton("📊 Thống kê DB", callback_data="admin_db_stats")
-    )
-    return markup
 
 def setBotCommands(bot):
     try:
@@ -86,17 +79,6 @@ def registerHandlers(bot):
         )
         bot.send_message(message.chat.id, welcomeText, parse_mode="HTML", reply_markup=mainMenu(message.chat.id))
 
-    @bot.message_handler(commands=['broadcast'])
-    @limit
-    def handleAdminBroadcast(message):
-        if str(message.chat.id) != adminId: return
-        rawInput = message.text.split(maxsplit=1)
-        if len(rawInput) < 2:
-            bot.reply_to(message, "Vui lòng nhập nội dung: <code>/broadcast Nội dung</code>", parse_mode="HTML")
-            return
-        bot.send_message(message.chat.id, "⏳ Đang gửi thông báo đến mọi người...")
-        total = teleFunc.broadcastToAllUsers(bot, rawInput[1])
-        bot.send_message(message.chat.id, f"✅ Đã gửi thông báo thành công cho {total} người dùng.")
 
     @bot.message_handler(func=lambda m: m.text == "🏛️ Portal Menu")
     def openPortal(message):
@@ -195,9 +177,6 @@ def registerHandlers(bot):
         msgWait = bot.send_message(message.chat.id, "⏳ Đang điều phối Worker kiểm tra kết nối...")
         task.systemStatusTask.delay(message.chat.id, msgWait.message_id)
 
-    @bot.message_handler(func=lambda m: m.text == "📊 Admin Stats" and str(m.chat.id) == adminId)
-    def handleAdminStats(message):
-        bot.send_message(message.chat.id, teleFunc.getAdminStats(adminId), parse_mode="HTML")
 
     @bot.message_handler(func=lambda m: m.text == "💰 Donate")
     @limit
@@ -237,82 +216,8 @@ def registerHandlers(bot):
     def onMarkUndone(call):
         handleMarkUndone(bot, call)
 
-    @bot.message_handler(func=lambda m: m.text == "⚙️ Admin Panel")
-    def handleAdminPanel(message):
-        if str(message.chat.id) == str(adminId):
-            bot.send_message(message.chat.id, "🛠 **ADMIN CONTROL PANEL**\nMày muốn test lập lịch nào?", 
-                            reply_markup=adminSubMenu(), parse_mode="Markdown")
 
-    @bot.callback_query_handler(func=lambda call: call.data == "retention_admin_all")
-    def handle_admin_retention_all(call):
-        if str(call.from_user.id) != str(adminId):
-            bot.answer_callback_query(call.id, "⛔ Bạn không có quyền sử dụng.")
-            return
-
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton(
-                "✅ Gửi cho tất cả",
-                callback_data="retention_admin_all_confirm",
-            ),
-            types.InlineKeyboardButton(
-                "❌ Hủy",
-                callback_data="retention_admin_all_cancel",
-            ),
-        )
-
-        bot.answer_callback_query(call.id)
-        bot.send_message(
-            call.message.chat.id,
-            (
-                "⚠️ <b>XÁC NHẬN GỬI HÀNG LOẠT</b>\n\n"
-                "Hệ thống sẽ gửi yêu cầu xác nhận tiếp tục sử dụng tới toàn bộ người dùng chưa có yêu cầu đang chờ.\n\n"
-                "Người dùng không phản hồi trong 48 giờ sẽ bị xóa khỏi hệ thống.\n\n"
-            ),
-            parse_mode="HTML",
-            reply_markup=markup,
-        )
-
-    @bot.callback_query_handler(
-        func=lambda call: call.data in {
-            "retention_admin_all_confirm",
-            "retention_admin_all_cancel",
-        }
-    )
-    def handle_admin_retention_confirmation(call):
-        if str(call.from_user.id) != str(adminId):
-            bot.answer_callback_query(call.id, "⛔ Bạn không có quyền sử dụng.")
-            return
-
-        if call.data == "retention_admin_all_cancel":
-            bot.answer_callback_query(call.id, "Đã hủy.")
-            bot.edit_message_reply_markup(
-                call.message.chat.id,
-                call.message.message_id,
-                reply_markup=None,
-            )
-            return
-
-        task.retention_request_all_task.delay(call.from_user.id)
-        bot.answer_callback_query(call.id, "🚀 Đã đưa yêu cầu vào hàng đợi.")
-        bot.edit_message_text(
-            "⏳ <b>ĐANG GỬI YÊU CẦU XÁC NHẬN</b>\n\n"
-            "Worker sẽ gửi báo cáo cho admin sau khi hoàn tất.",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="HTML",
-            reply_markup=None,
-        )
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('test_cron_'))
-    def handleTestCron(call):
-        import threading
-        if call.data == "test_cron_portal":
-            bot.answer_callback_query(call.id, "🚀 Đang chạy quét lịch...")
-            threading.Thread(target=cronService.autoCheckAndNotify, args=(bot,)).start()
-        elif call.data == "test_cron_deadline":
-            bot.answer_callback_query(call.id, "🚀 Đang chạy quét deadline...")
-            threading.Thread(target=cronService.autoScanAllUsers, args=(bot,)).start()
+    admin_handlers.register_admin_handlers(bot)
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith('donate_'))
     def onDonateCallback(call):
