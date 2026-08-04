@@ -44,10 +44,16 @@ app.conf.update(
         'tasks.periodicPortalTask': {'queue': 'low_priority'},
         'tasks.periodicCourseTask': {'queue': 'low_priority'},
         'tasks.checkPaymentTask': {'queue': 'low_priority'},
+        'tasks.retentionMaintenanceTask': {'queue': 'low_priority'},
+        'tasks.retentionRequestAllTask': {'queue': 'low_priority'},
     }
 )
 
 app.conf.beat_schedule = {
+    'retention-maintenance-daily': {
+        'task': 'tasks.retentionMaintenanceTask',
+        'schedule': crontab(minute=0, hour=6),
+    },
     'update-weather-hourly': {
         'task': 'tasks.updateWeatherTask',
         'schedule': crontab(minute=0, hour='4-22'),
