@@ -7,6 +7,8 @@ import json
 import os
 from utils import log
 import utils
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 # from curl_cffi import requests
 
 redisClient = redis.Redis(
@@ -15,6 +17,45 @@ redisClient = redis.Redis(
     db=0, 
     decode_responses=True
 )
+
+def _portalMuteDate(targetDate):
+    if isinstance(targetDate, datetime):
+        raise TypeError("targetDate phải là date hoặc chuỗi YYYY-MM-DD")
+
+    if isinstance(targetDate, date):
+        return targetDate
+
+    return date.fromisoformat(targetDate)
+
+
+def mutePortalDate(chatId, targetDate):
+    targetDate = _portalMuteDate(targetDate)
+
+    expiresAt = datetime.combine(
+        targetDate + timedelta(days=1),
+        time.min,
+        tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"),
+    )
+
+    if expiresAt <= datetime.now(expiresAt.tzinfo):
+        return False
+
+    key = f"portal:mute:{chatId}:{targetDate.isoformat()}"
+
+    return bool(
+        redisClient.set(
+            key,
+            "1",
+            exat=int(expiresAt.timestamp()),
+        )
+    )
+
+
+def isPortalDateMuted(chatId, targetDate):
+    targetDate = _portalMuteDate(targetDate)
+    key = f"portal:mute:{chatId}:{targetDate.isoformat()}"
+
+    return bool(redisClient.exists(key))
 
 def saveSession(chatId, serviceType, data, expire=7200):
     key = f"auth:{serviceType}:{chatId}"

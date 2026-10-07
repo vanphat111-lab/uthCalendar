@@ -4,14 +4,19 @@
 
 import time
 import traceback
+
+from dateutil.utils import today
 import database as db
 from utils import log
 import task
 from datetime import datetime, timedelta
+import redisManager
+from zoneinfo import ZoneInfo
 
 
 def autoCheckAndNotify(bot, dayOffset=0):
-    targetDate = datetime.now() + timedelta(days=dayOffset)
+    today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+    targetDate = today + timedelta(days=dayOffset)
     dateStr = targetDate.strftime("%d/%m/%Y")
 
     log("CRON", "Bắt đầu chu kỳ quét Portal")
@@ -24,6 +29,10 @@ def autoCheckAndNotify(bot, dayOffset=0):
         # today = time.strftime("%d/%m/%Y")
         for chat_id in users:
             try:
+                if targetDate == today and redisManager.isPortalDateMuted(chat_id, targetDate):
+                    log("CRON", f"Bỏ qua lịch đã mute cho user: {chat_id}, ngày: {dateStr}")
+                    continue
+
                 task.periodicPortalTask.delay(chat_id, dateStr)
                 log("CRON", f"Đã đẩy task Portal cho user: {chat_id}")
             except Exception:

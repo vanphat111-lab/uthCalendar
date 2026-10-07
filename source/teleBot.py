@@ -18,6 +18,8 @@ import rate_limit
 import retention_service
 import admin_handlers
 import admin_security
+import redisManager
+from zoneinfo import ZoneInfo
 
 adminId = admin_security.get_primary_admin_id()
 
@@ -239,6 +241,12 @@ def registerHandlers(bot):
             except Exception as e:
                 utils.log("ERROR", f"Lỗi xử lý callback donate: {e}")
 
+    @bot.callback_query_handler(
+        func=lambda call: bool(call.data) and call.data.startswith("mute_portal_date_")
+    )
+    def onMutePortalDate(call):
+        handleMutePortalDate(call, bot)
+
     @bot.message_handler(func=lambda m: True)
     @limit
     def handleUnknown(message):
@@ -327,3 +335,35 @@ def processCustomDonateAmount(message, bot):
         task.donateTask.delay(message.chat.id, message.from_user.username, amount)
     except ValueError:
         bot.send_message(message.chat.id, "❌ Số tiền phải là số nguyên dương! Vui lòng bấm lại nút Donate để làm lại.")
+
+def handleMutePortalDate(call, bot):
+    if (not call.message
+        or call.message.chat.type != "private"
+        or call.message.chat.id != call.from_user.id):
+        bot.answer_callback_query(call.id, "Nút này chỉ dùng trong cuộc trò chuyện riêng của bạn.",)
+        return
+
+    try:
+        dateStr = call.data.removeprefix("mute_portal_date_")
+        targetDate = datetime.strptime(dateStr, "%Y-%m-%d").date()
+    except ValueError:
+        bot.answer_callback_query(call.id, "Ngày lịch không hợp lệ.")
+        return
+
+    today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+
+    if targetDate != today:
+        bot.answer_callback_query(call.id, "Nút này chỉ tắt nhắc lịch của ngày hôm nay.")
+        return
+
+    try:
+        success = redisManager.mutePortalDate(call.from_user.id,targetDate)
+    except Exception as exc:
+        utils.log("ERROR", f"Không thể mute lịch cho {call.from_user.id}: {exc}")
+        success = False
+
+    if not success:
+        bot.answer_callback_query(call.id, "Không thể tắt nhắc lịch. Bạn thử lại nhé.")
+        return
+
+    bot.answer_callback_query(call.id, "Đã tắt nhắc lịch hôm nay")

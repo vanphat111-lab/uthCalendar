@@ -17,7 +17,8 @@ import payosService
 import retention_service
 import database as db
 from telebot import types
-import urllib.parse
+# import urllib.parse
+from zoneinfo import ZoneInfo
 
 # Khởi tạo Bot để gửi tin nhắn
 bot = TeleBot(os.getenv("TELE_TOKEN"))
@@ -151,7 +152,20 @@ def periodicPortalTask(self, chatId, dateStr):
     log("WORKER", f"Đang quét lịch cho user: {chatId}")
     msg = portalService.formatCalendarMessage(chatId, dateStr, isAuto=True)
     if msg:
-        bot.send_message(chatId, msg, parse_mode="HTML", disable_web_page_preview=True)
+        markup = None
+        targetDate = datetime.strptime(dateStr, "%d/%m/%Y").date()
+        today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+
+        if targetDate == today:
+            markup = types.InlineKeyboardMarkup()
+            markup.add(
+                types.InlineKeyboardButton(
+                    "🔕 Không nhắc lại hôm nay",
+                    callback_data=f"mute_portal_date_{targetDate.isoformat()}",
+                )
+            )
+
+        bot.send_message(chatId, msg, parse_mode="HTML", disable_web_page_preview=True, reply_markup=markup)
 
 @app.task(
     name="tasks.retentionMaintenanceTask",
