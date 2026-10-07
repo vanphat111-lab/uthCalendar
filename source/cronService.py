@@ -11,11 +11,11 @@ from utils import log
 import task
 from datetime import datetime, timedelta
 import redisManager
-from zoneinfo import ZoneInfo
+# from zoneinfo import ZoneInfo
 
 
 def autoCheckAndNotify(bot, dayOffset=0):
-    today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+    today = datetime.now().date()
     targetDate = today + timedelta(days=dayOffset)
     dateStr = targetDate.strftime("%d/%m/%Y")
 

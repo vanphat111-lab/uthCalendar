@@ -242,7 +242,7 @@ def getDeadlineMessages(
             
             msgList = []
             for e in allEvents:
-                dueDt = datetime.fromtimestamp(e['timesort']) + timedelta(hours=7, minutes=-30)
+                dueDt = (datetime.fromtimestamp(e["timesort"]) - timedelta(minutes=30))
                 dueStr = dueDt.strftime('%d/%m/%Y %H:%M')
                 isDone = str(e['id']) in completedIds
                 status = "✅ Đã xong" if isDone else "❌ Chưa xong"

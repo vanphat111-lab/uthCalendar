@@ -19,7 +19,7 @@ import retention_service
 import admin_handlers
 import admin_security
 import redisManager
-from zoneinfo import ZoneInfo
+# from zoneinfo import ZoneInfo
 
 adminId = admin_security.get_primary_admin_id()
 
@@ -350,7 +350,7 @@ def handleMutePortalDate(call, bot):
         bot.answer_callback_query(call.id, "Ngày lịch không hợp lệ.")
         return
 
-    today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+    today = datetime.now().date()
 
     if targetDate != today:
         bot.answer_callback_query(call.id, "Nút này chỉ tắt nhắc lịch của ngày hôm nay.")

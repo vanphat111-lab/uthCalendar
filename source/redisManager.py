@@ -8,7 +8,7 @@ import os
 from utils import log
 import utils
 from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+# from zoneinfo import ZoneInfo
 # from curl_cffi import requests
 
 redisClient = redis.Redis(
@@ -34,7 +34,7 @@ def mutePortalDate(chatId, targetDate):
     expiresAt = datetime.combine(
         targetDate + timedelta(days=1),
         time.min,
-        tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"),
+        tzinfo=utils.APP_TZ,
     )
 
     if expiresAt <= datetime.now(expiresAt.tzinfo):

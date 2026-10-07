@@ -18,7 +18,7 @@ import retention_service
 import database as db
 from telebot import types
 # import urllib.parse
-from zoneinfo import ZoneInfo
+# from zoneinfo import ZoneInfo
 
 # Khởi tạo Bot để gửi tin nhắn
 bot = TeleBot(os.getenv("TELE_TOKEN"))
@@ -154,7 +154,7 @@ def periodicPortalTask(self, chatId, dateStr):
     if msg:
         markup = None
         targetDate = datetime.strptime(dateStr, "%d/%m/%Y").date()
-        today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
+        today = datetime.now().date()
 
         if targetDate == today:
             markup = types.InlineKeyboardMarkup()
