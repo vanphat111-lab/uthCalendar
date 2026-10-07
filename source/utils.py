@@ -12,12 +12,18 @@ import string
 import random
 from curl_cffi import requests
 import time
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 
 encryptionKey = os.getenv("ENCRYPTION_KEY")
 cipherSuite = Fernet(encryptionKey.encode()) if encryptionKey else None
 WARP_PROXY = os.getenv("WARP_PROXY_URL", "socks5://uth_warp:1080")
+TZ_NAME = os.getenv("TZ", "Asia/Ho_Chi_Minh").strip()
+APP_TZ = ZoneInfo(TZ_NAME)
+
+os.environ["TZ"] = TZ_NAME
+time.tzset()
 
 def getNow(): return datetime.now().strftime('%d/%m/%Y %H:%M:%S')
 def log(level, message): print(f"[{getNow()}] [{level}] {message}", flush=True)

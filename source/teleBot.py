@@ -18,6 +18,8 @@ import rate_limit
 import retention_service
 import admin_handlers
 import admin_security
+import redisManager
+# from zoneinfo import ZoneInfo
 
 adminId = admin_security.get_primary_admin_id()
 
@@ -41,14 +43,14 @@ def portalSubMenu():
     markup.add("🔔 Bật tắt thông báo lịch")
     markup.add("📅 Lịch hôm nay", "⏭️ Lịch ngày mai", "📆 Lịch ngày tùy chọn")
     markup.add("📅 Lịch cả tuần", "🗓️ Lịch tuần sau")
-    markup.add("🏠 Quay lại menu chính")
+    markup.row("🏛️ Portal Menu", "🏠 Menu chính", "📚 Course Menu")
     return markup
 
 def courseSubMenu():
-    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    markup = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
     markup.add("📢 Bật tắt thông báo hằng tuần")
     markup.add("📑 Quét deadline", "🔍 Quét tùy chỉnh")
-    markup.add("🏠 Quay lại menu chính")
+    markup.row("🏛️ Portal Menu", "🏠 Menu chính", "📚 Course Menu")
     return markup
 
 
@@ -62,6 +64,21 @@ def setBotCommands(bot):
         ]
         bot.set_my_commands(commands)
     except: pass
+
+def dispatchWithStatus(bot, chatId, celeryTask, *args):
+    msgWait = bot.send_message(chatId, "⏳ Đang chờ xử lý...", disable_notification=True)
+
+    try:
+        celeryTask.apply_async(
+            args=(chatId, *args),
+            kwargs={"statusMessageId": msgWait.message_id}
+        )
+    except Exception as e:
+        utils.log("ERROR", f"Lỗi đẩy task cho {chatId}: {e}")
+        try:
+            bot.edit_message_text("❌ Không thể đưa yêu cầu vào hàng đợi. Bạn thử lại nhé.", chatId, msgWait.message_id)
+        except Exception as e:
+            utils.log("ERROR", f"Lỗi báo trạng thái cho {chatId}: {e}")
 
 def registerHandlers(bot):
     # Rate limit handler
@@ -88,23 +105,21 @@ def registerHandlers(bot):
     def openCourse(message):
         bot.send_message(message.chat.id, "📚 <b>HỆ THỐNG COURSES</b>", parse_mode="HTML", reply_markup=courseSubMenu())
 
-    @bot.message_handler(func=lambda m: m.text == "🏠 Quay lại menu chính")
+    @bot.message_handler(func=lambda m: m.text == "🏠 Menu chính")
     def backToMain(message):
-        bot.send_message(message.chat.id, "🏠 Đã quay lại Menu chính.", reply_markup=mainMenu(message.chat.id))
+        bot.send_message(message.chat.id, "🏠 <b>Đã quay lại Menu chính.</b>", parse_mode="HTML", reply_markup=mainMenu(message.chat.id))
 
     @bot.message_handler(func=lambda m: m.text == "📅 Lịch hôm nay")
     @limit
     def handleToday(message):
-        bot.send_message(message.chat.id, "⏳ Đang điều phối Worker để quét lịch cho bạn...")
         today = datetime.now().strftime("%d/%m/%Y")
-        task.portalTask.delay(message.chat.id, today)
+        dispatchWithStatus(bot, message.chat.id, task.portalTask, today)
 
     @bot.message_handler(func=lambda m: m.text == "⏭️ Lịch ngày mai")
     @limit
     def handleTomorrow(message):
-        bot.send_message(message.chat.id, "⏳ Đang điều phối Worker để quét lịch ngày mai cho bạn...")
         tomorrow = (datetime.now() + timedelta(days=1)).strftime("%d/%m/%Y")
-        task.portalTask.delay(message.chat.id, tomorrow)
+        dispatchWithStatus(bot, message.chat.id, task.portalTask, tomorrow)
 
     @bot.message_handler(func=lambda m: m.text == "📆 Lịch ngày tùy chọn")
     @limit
@@ -123,27 +138,21 @@ def registerHandlers(bot):
     @limit
     def handleWeekSchedule(message):
         chatId = message.chat.id
-        bot.send_message(chatId, "⏳ Đang tổng hợp lịch tuần này cho bạn...")
-        
         today = datetime.now().strftime("%d/%m/%Y")
-        task.portalWeekTask.delay(chatId, today)
+        dispatchWithStatus(bot, chatId, task.portalWeekTask, today)
 
     @bot.message_handler(func=lambda m: m.text == "🗓️ Lịch tuần sau")
     @limit
     def handleNextWeek(message):
         chatId = message.chat.id
-        bot.send_message(chatId, "⏳ Đang tổng hợp lịch tuần sau cho bạn...")
-        
         next_week_dt = datetime.now() + timedelta(days=7)
         next_week_str = next_week_dt.strftime("%d/%m/%Y")
-        
-        task.portalWeekTask.delay(chatId, next_week_str)
+        dispatchWithStatus(bot, chatId, task.portalWeekTask, next_week_str)
 
     @bot.message_handler(func=lambda m: m.text == "📑 Quét deadline")
     @limit
     def handleDeadlineScan(message):
-        bot.send_message(message.chat.id, "🔍 Đang điều phối Worker kiểm tra Deadline giúp bạn...")
-        task.deadlineTask.delay(message.chat.id)
+        dispatchWithStatus(bot, message.chat.id, task.deadlineTask)
 
     @bot.message_handler(func=lambda message: message.text == "🔍 Quét tùy chỉnh")
     @limit
@@ -174,8 +183,19 @@ def registerHandlers(bot):
     @bot.message_handler(func=lambda m: m.text == "🛠️ Kiểm tra hệ thống")
     @limit
     def handleStatus(message):
-        msgWait = bot.send_message(message.chat.id, "⏳ Đang điều phối Worker kiểm tra kết nối...")
-        task.systemStatusTask.delay(message.chat.id, msgWait.message_id)
+        msgWait = bot.send_message(message.chat.id, "⏳ Đang chờ xử lý...", disable_notification=True)
+        try:
+            task.systemStatusTask.delay(message.chat.id, msgWait.message_id)
+        except Exception as e:
+            utils.log("ERROR", f"Lỗi đẩy task kiểm tra hệ thống: {e}")
+            try:
+                bot.edit_message_text(
+                    "❌ Không thể đưa yêu cầu vào hàng đợi. Bạn thử lại nhé.",
+                    message.chat.id,
+                    msgWait.message_id
+                )
+            except Exception as e:
+                utils.log("ERROR", f"Lỗi báo trạng thái kiểm tra hệ thống: {e}")
 
 
     @bot.message_handler(func=lambda m: m.text == "💰 Donate")
@@ -233,11 +253,16 @@ def registerHandlers(bot):
             try:
                 amount = int(action)
                 bot.answer_callback_query(call.id)
-                bot.send_message(chatId, "⏳ Đang điều phối Worker khởi tạo mã VietQR...")
-                task.donateTask.delay(chatId, call.from_user.username, amount)
+                dispatchWithStatus(bot, chatId, task.donateTask, call.from_user.username, amount)
                 bot.edit_message_reply_markup(chatId, call.message.message_id, reply_markup=None)
             except Exception as e:
                 utils.log("ERROR", f"Lỗi xử lý callback donate: {e}")
+
+    @bot.callback_query_handler(
+        func=lambda call: bool(call.data) and call.data.startswith("mute_portal_date_")
+    )
+    def onMutePortalDate(call):
+        handleMutePortalDate(call, bot)
 
     @bot.message_handler(func=lambda m: True)
     @limit
@@ -254,16 +279,14 @@ def processMssvStep(message, bot):
 
 def processPasswordStep(message, bot, mssv):
     pwd = message.text
-    bot.send_message(message.chat.id, "⏳ Thông tin đã được gửi cho Worker xác thực...")
-    task.registrationTask.delay(message.chat.id, mssv, pwd)
+    dispatchWithStatus(bot, message.chat.id, task.registrationTask, mssv, pwd)
 
 def processCustomDate(message, bot):
     utils.cancelStepTimeout(message.chat.id)
     try:
         dateStr = message.text
         datetime.strptime(dateStr, "%d/%m/%Y")
-        bot.send_message(message.chat.id, f"⏳ Đang điều phối Worker để quét lịch ngày {dateStr} cho bạn...")
-        task.portalTask.delay(message.chat.id, dateStr)
+        dispatchWithStatus(bot, message.chat.id, task.portalTask, dateStr)
     except ValueError:
         bot.send_message(message.chat.id, "❌ Định dạng ngày chưa đúng!\nHãy nhập theo kiểu: <b>DD/MM/YYYY</b> (ví dụ: 20/03/2026).", parse_mode="HTML")
     except Exception as e:
@@ -283,8 +306,7 @@ def processDaysStep(message, startDateStr, bot):
         numDays = int(message.text)
         if numDays <= 0:
             raise ValueError("Số ngày phải lớn hơn 0")
-        bot.send_message(message.chat.id, f"🚀 Đang gửi yêu cầu quét từ {startDateStr} trong {numDays} ngày...")
-        task.customDeadlineTask.delay(message.chat.id, startDateStr, numDays)
+        dispatchWithStatus(bot, message.chat.id, task.customDeadlineTask, startDateStr, numDays)
     except ValueError:
         bot.send_message(message.chat.id, "❌ Số ngày phải là số nguyên dương!")
 
@@ -323,7 +345,38 @@ def processCustomDonateAmount(message, bot):
         if amount < 2000:
             bot.send_message(message.chat.id, "⚠️ Số tiền tối thiểu để tạo mã QR là 2.000 VNĐ.")
             return
-        bot.send_message(message.chat.id, "⏳ Đang điều phối Worker khởi tạo mã VietQR...")
-        task.donateTask.delay(message.chat.id, message.from_user.username, amount)
+        dispatchWithStatus(bot, message.chat.id, task.donateTask, message.from_user.username, amount)
     except ValueError:
         bot.send_message(message.chat.id, "❌ Số tiền phải là số nguyên dương! Vui lòng bấm lại nút Donate để làm lại.")
+
+def handleMutePortalDate(call, bot):
+    if (not call.message
+        or call.message.chat.type != "private"
+        or call.message.chat.id != call.from_user.id):
+        bot.answer_callback_query(call.id, "Nút này chỉ dùng trong cuộc trò chuyện riêng của bạn.",)
+        return
+
+    try:
+        dateStr = call.data.removeprefix("mute_portal_date_")
+        targetDate = datetime.strptime(dateStr, "%Y-%m-%d").date()
+    except ValueError:
+        bot.answer_callback_query(call.id, "Ngày lịch không hợp lệ.")
+        return
+
+    today = datetime.now().date()
+
+    if targetDate != today:
+        bot.answer_callback_query(call.id, "Nút này chỉ tắt nhắc lịch của ngày hôm nay.")
+        return
+
+    try:
+        success = redisManager.mutePortalDate(call.from_user.id,targetDate)
+    except Exception as exc:
+        utils.log("ERROR", f"Không thể mute lịch cho {call.from_user.id}: {exc}")
+        success = False
+
+    if not success:
+        bot.answer_callback_query(call.id, "Không thể tắt nhắc lịch. Bạn thử lại nhé.")
+        return
+
+    bot.answer_callback_query(call.id, "Đã tắt nhắc lịch hôm nay")

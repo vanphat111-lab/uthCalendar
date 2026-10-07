@@ -5,7 +5,7 @@
 import telebot, os, threading, schedule, time, sys
 import teleBot, cronService, database as db
 import task
-from utils import log
+from utils import log, TZ_NAME
 
 critical_vars = ["TELE_TOKEN", "ADMIN_ID", "ENCRYPTION_KEY", "DB_HOST", "DB_NAME", "DB_USER", "DB_PASS", "CELERY_BROKER_URL"]
 missing_critical = [v for v in critical_vars if not os.getenv(v)]
@@ -41,6 +41,8 @@ def runScheduler():
         time.sleep(30)
 
 if __name__ == "__main__":
+    log("SYSTEM", f"Timezone: {TZ_NAME} | " f"Giờ hiện tại: {time.strftime('%d/%m/%Y %H:%M:%S %z')}")
+    
     if not db.initDb():
         log("CRITICAL", "Không thể khởi tạo PostgreSQL. Dừng hệ thống!")
         sys.exit(1)

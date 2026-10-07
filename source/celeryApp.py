@@ -9,6 +9,7 @@ from celery.signals import worker_process_init, worker_process_shutdown
 
 import database as db
 from utils import log
+import utils
 
 
 REDIS_URL = os.getenv('CELERY_BROKER_URL', 'redis://uth_redis:6379/0')
@@ -32,7 +33,7 @@ def closeWorkerDbPool(**kwargs):
 
 app.conf.update(
     task_serializer='json',
-    timezone='Asia/Ho_Chi_Minh',
+    timezone=utils.TZ_NAME,
     enable_utc=True,
     task_routes={
         'tasks.portalTask': {'queue': 'high_priority'},
