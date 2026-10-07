@@ -324,6 +324,31 @@ def retention_request_all_task(requested_by):
 
 
 @app.task(
+    name="tasks.retentionMaintenanceTask",
+    queue="low_priority",
+)
+def retention_maintenance_task():
+    log("RETENTION", "Bắt đầu retention maintenance hằng ngày")
+    return retention_service.run_maintenance(bot)
+
+
+@app.task(
+    name="tasks.retentionRequestAllTask",
+    queue="low_priority",
+)
+def retention_request_all_task(requested_by):
+    if not _ensure_admin_task(requested_by):
+        return {"authorized": False}
+
+    log("RETENTION", f"Admin {requested_by} yêu cầu xác nhận toàn bộ user")
+    return retention_service.send_retention_requests(
+        bot,
+        mode="all",
+        requested_by=requested_by,
+    )
+
+
+@app.task(
     name='tasks.updateWeatherTask',
     queue='low_priority'
 )
