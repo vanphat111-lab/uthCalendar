@@ -25,6 +25,29 @@ services:
     networks:
       - uth-network
 
+  uth_warp_2:
+    image: caomingjun/warp
+    container_name: uth_warp_2
+    restart: always
+    device_cgroup_rules:
+      - 'c 10:200 rwm'
+    cap_add:
+      - MKNOD
+      - AUDIT_WRITE
+      - NET_ADMIN
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      - WARP_SLEEP=2
+      - LOG_LEVEL=info
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - uth_warp_2_data:/var/lib/cloudflare-warp
+    networks:
+      - uth-network
+
   # Database - PostgreSQL
   uth_db:
     image: postgres:15-alpine
@@ -57,10 +80,9 @@ services:
     depends_on:
       - uth_db
       - uth_warp
+      - uth_warp_2
     networks:
       - uth-network
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - CELERY_BROKER_URL=redis://uth_redis:6379/0
       - PYTHONUNBUFFERED=1
@@ -77,6 +99,7 @@ services:
       - PAYOS_API_KEY=${PAYOS_API_KEY}
       - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
       - WARP_PROXY_URL=socks5://uth_warp:1080
+      - WARP_PROXIES=socks5://uth_warp:1080,socks5://uth_warp_2:1080
 
   # Worker VIP - Chỉ xử lý hàng ưu tiên
   worker_vip:
@@ -86,12 +109,11 @@ services:
     command: python -m celery -A task worker -Q high_priority --concurrency=2 --loglevel=info
     networks:
       - uth-network
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - uth_redis
       - uth_db
       - uth_warp
+      - uth_warp_2
     environment:
       - TELE_TOKEN=${TELE_TOKEN}
       - DB_HOST=${DB_HOST}
@@ -104,6 +126,7 @@ services:
       - PAYOS_API_KEY=${PAYOS_API_KEY}
       - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
       - WARP_PROXY_URL=socks5://uth_warp:1080
+      - WARP_PROXIES=socks5://uth_warp:1080,socks5://uth_warp_2:1080
       - ADMIN_ID=${ADMIN_ID}
 
   # Worker Low - Xử lý đa nhiệm
@@ -114,12 +137,11 @@ services:
     command: python -m celery -A task worker -Q high_priority,low_priority --concurrency=3 --loglevel=info
     networks:
       - uth-network
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - uth_redis
       - uth_db
       - uth_warp
+      - uth_warp_2
     environment:
       - TELE_TOKEN=${TELE_TOKEN}
       - DB_HOST=${DB_HOST}
@@ -132,6 +154,7 @@ services:
       - PAYOS_API_KEY=${PAYOS_API_KEY}
       - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
       - WARP_PROXY_URL=socks5://uth_warp:1080
+      - WARP_PROXIES=socks5://uth_warp:1080,socks5://uth_warp_2:1080
       - ADMIN_ID=${ADMIN_ID}
 
   # Celery Beat - Lập lịch định kỳ
@@ -172,6 +195,7 @@ volumes:
   uth_db_data:
   redis_data:
   uth_warp_data:
+  uth_warp_2_data:
 
 networks:
   uth-network:
