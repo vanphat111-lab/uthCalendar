@@ -25,8 +25,9 @@ APP_TZ = ZoneInfo(TZ_NAME)
 os.environ["TZ"] = TZ_NAME
 time.tzset()
 
-def getNow(): return datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-def log(level, message): print(f"[{getNow()}] [{level}] {message}", flush=True)
+from app_logger import log, logger
+
+def getNow(): return datetime.now(APP_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
 def encryptData(data):
     if not data: return None
