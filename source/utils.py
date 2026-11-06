@@ -97,7 +97,6 @@ def generateFakeCaptcha(length=30):
     return ''.join(random.choice(chars) for _ in range(length))
 
 def safeRequest(method, url, use_proxy=True, silent=False, retries=3, **kwargs):
-    # CHỖ NÀY: Import bên trong hàm để tránh Circular Import
     from warpManager import warp_manager 
     
     headers = kwargs.get("headers", {})
@@ -111,10 +110,11 @@ def safeRequest(method, url, use_proxy=True, silent=False, retries=3, **kwargs):
     kwargs.setdefault("timeout", 10)
 
     for attempt in range(retries):
-        if use_proxy:
+        chosen_proxy = warp_manager.get_proxy() if use_proxy else None
+        if chosen_proxy:
             kwargs["proxies"] = {
-                "http": WARP_PROXY,
-                "https": WARP_PROXY
+                "http": chosen_proxy,
+                "https": chosen_proxy
             }
         else:
             kwargs.pop("proxies", None)
@@ -126,19 +126,18 @@ def safeRequest(method, url, use_proxy=True, silent=False, retries=3, **kwargs):
                     log(method, f"Thành công: {url}")
                 
                 if response.status_code == 429:
-                    log("WARN", "Dính lỗi 429 (Spam). Đang thực hiện reset WARP...")
-                    warp_manager.restart_warp()
-                    # Nghỉ 5s cho tunnel ổn định rồi thử lại lượt tiếp theo
-                    time.sleep(5)
+                    log("WARN", f"Dính lỗi 429 qua {chosen_proxy}. Đang cách ly proxy và thử proxy khác...")
+                    warp_manager.mark_blocked(chosen_proxy, reason="429 Too Many Requests", cooldown_seconds=180)
+                    time.sleep(1)
                     continue 
                     
                 return response
         except Exception as e:
             if not silent:
-                log("WARN", f"Lần thử {attempt+1} qua WARP thất bại: {e}")
+                log("WARN", f"Lần thử {attempt+1} qua {chosen_proxy} thất bại: {e}")
             
             if attempt == retries - 1:
                 return None
             
-            time.sleep(2)
+            time.sleep(1)
     return None
