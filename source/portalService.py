@@ -16,21 +16,33 @@ def verifyUthCredentials(user, password):
         url = f"https://portal.ut.edu.vn/api/v1/user/login?g-recaptcha-response={fakeCaptcha}" 
 
         r = utils.safeRequest("POST", url, json={"username": user, "password": password})
-        
+        if r is None:
+            return False, "Không thể kết nối đến máy chủ trường (Hết thời gian chờ). Vui lòng thử lại sau."
+
+        if r.status_code == 500:
+            utils.log("ERROR", "Máy chủ Portal trường trả mã 500 (Mất kết nối backend/API)")
+            return False, "Máy chủ cổng trường đang gặp sự cố kết nối nội bộ (Mã lỗi 500). Vui lòng thử lại sau ít phút."
+
+        if r.status_code in (502, 503, 504):
+            utils.log("WARN", f"Máy chủ Portal trường bảo trì/quá tải ({r.status_code})")
+            return False, f"Cổng đào tạo trường đang bảo trì hoặc quá tải (Mã HTTP: {r.status_code})."
+
         try:
             data = r.json()
         except Exception:
             utils.log("ERROR", f"Server không trả về JSON. Mã lỗi HTTP: {r.status_code}. Nội dung: {r.text[:500]}")
-            return False, "Lỗi phản hồi từ server trường"
+            return False, f"Phản hồi từ cổng trường không hợp lệ (Mã HTTP: {r.status_code})."
 
         utils.log("INFO", f"Portal trả về: {data.get('message')}")
         
         if r.status_code == 200 and data.get("token"): 
             return True, "Thành công"
-        return False, data.get("message", "Sai tài khoản hoặc mật khẩu")
+
+        school_msg = data.get("message") or "Sai thông tin đăng nhập"
+        return False, school_msg
     except Exception as e: 
-        utils.log("ERROR", f"Lỗi verifyUthCredentials: {e}")
-        return False, "Lỗi kết nối server trường"
+        utils.log("ERROR", f"Lỗi verifyUthCredentials: {e}", exc_info=True)
+        return False, "Lỗi kết nối máy chủ trường."
 
 def get_classes_by_week(chat_id, user, password, targetDate):
     try:
@@ -39,7 +51,7 @@ def get_classes_by_week(chat_id, user, password, targetDate):
 
         tk = getValidPortalToken(chat_id, user, password)
         if not tk: 
-            return False, "Không thể lấy Token. Vui lòng kiểm tra lại tài khoản/mật khẩu."
+            return False, "AUTH:Sai thông tin đăng nhập"
 
         headers = {
             "authorization": f"Bearer {tk}",
@@ -51,23 +63,35 @@ def get_classes_by_week(chat_id, user, password, targetDate):
         url = f"https://portal.ut.edu.vn/api/v1/lichhoc/lichTuan?date={iso_date}"
         res = utils.safeRequest("GET", url, headers=headers)
 
+        if res is None:
+            return False, "Không thể kết nối đến máy chủ trường (Hết thời gian chờ). Vui lòng thử lại sau."
+
         if res.status_code == 401:
             utils.log("WARN", f"Token của {chat_id} bị Invalid khi lấy lịch tuần. Đang login lại...")
             tk = redisManager.loginAndSaveToken(chat_id, user, password)
             if not tk: 
-                return False, "Phiên đăng nhập hết hạn và không thể gia hạn. Hãy đăng ký lại."
+                return False, "AUTH:Sai thông tin đăng nhập"
             
-            headers["Authorization"] = f"Bearer {tk}"
+            headers["authorization"] = f"Bearer {tk}"
             res = utils.safeRequest("GET", url, headers=headers)
+            if res is None:
+                return False, "Không thể kết nối đến máy chủ trường sau khi làm mới phiên."
+
+        if res.status_code == 500:
+            utils.log("ERROR", "Máy chủ Portal trả mã 500 khi lấy lịch tuần")
+            return False, "Máy chủ cổng trường đang gặp sự cố kết nối nội bộ (Mã lỗi 500). Vui lòng thử lại sau ít phút."
+
+        if res.status_code in (502, 503, 504):
+            return False, f"Cổng đào tạo trường đang bảo trì hoặc quá tải (Mã HTTP: {res.status_code})."
 
         if res.status_code == 200:
             data = res.json().get("body", [])
             return data, None
 
-        return False, f"Lỗi không xác định từ server trường (Mã: {res.status_code})"
+        return False, f"Lỗi không xác định từ máy chủ trường (Mã: {res.status_code})"
 
     except Exception as e:
-        utils.log("ERROR", f"Lỗi get_classes_by_week: {e}")
+        utils.log("ERROR", f"Lỗi get_classes_by_week: {e}", exc_info=True)
         return False, "Lỗi hệ thống không xác định khi lấy lịch tuần."
 
 def getClassesByDate(chatId, user, password, targetDate):
@@ -89,8 +113,8 @@ def verifyAndSaveUser(chatId, mssv, password):
     isValid, reason = verifyUthCredentials(mssv, password)
 
     if not isValid:
-        utils.log("ERROR", f"User {chatId} đăng ký thất bại: {reason}")
-        return False, f"❌ Thất bại: {reason}"
+        utils.log("WARN", f"User {chatId} đăng ký thất bại: {reason}")
+        return False, reason
 
     encryptedUser = utils.encryptData(mssv)
     encryptedPassword = utils.encryptData(password)
@@ -103,7 +127,7 @@ def verifyAndSaveUser(chatId, mssv, password):
 
     if not saved:
         utils.log("ERROR", f"Không thể lưu tài khoản của user {chatId}")
-        return False, "❌ Xác thực thành công nhưng không thể lưu tài khoản."
+        return False, "Lỗi cơ sở dữ liệu: Không thể lưu tài khoản."
 
     utils.log("SUCCESS", f"User {chatId} đã đăng ký thành công")
     return True, "🎉 <b>Đăng ký thành công!</b> Mình sẽ tự động nhắc lịch cho bạn."
@@ -117,6 +141,8 @@ def getValidPortalToken(chatId, rawUser, rawPass):
         fakeCaptcha = utils.generateFakeCaptcha()
         url = f"https://portal.ut.edu.vn/api/v1/user/login?g-recaptcha-response={fakeCaptcha}"
         r = utils.safeRequest("POST", url, json={"username": rawUser, "password": rawPass})
+        if r is None or r.status_code != 200:
+            return None
 
         try:
             res_data = r.json()
@@ -130,7 +156,7 @@ def getValidPortalToken(chatId, rawUser, rawPass):
             redisManager.saveSession(chatId, 'portal', token, expire=7200)
             return token
     except Exception as e:
-        utils.log("ERROR", f"Lỗi Server Portal: {e}")
+        utils.log("ERROR", f"Lỗi Server Portal: {e}", exc_info=True)
     return None
 
 def formatCalendarMessage(chatId, dateStr, isAuto=False):

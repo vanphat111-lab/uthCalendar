@@ -54,30 +54,62 @@ class TaskStatus:
         self.messageId = messageId
         self.failed = False
 
-    def debugText(self):
-        worker = escape(str(self.taskSelf.request.hostname or "unknown"))
-        taskId = escape(str(self.taskSelf.request.id or "unknown"))
-        return (
-            f"\n\n🤖 <b>Worker:</b> <code>{worker}</code>"
-            f"\n🆔 <b>Task:</b> <code>{taskId}</code>"
-        )
+    def getReferenceCode(self):
+        taskId = str(self.taskSelf.request.id or "")
+        return taskId[-6:].upper() if taskId else "N/A"
+
+    def formatErrorMessage(self, text, isAuthError=False):
+        refCode = self.getReferenceCode()
+
+        if text.startswith("AUTH:") or isAuthError or "Sai thông tin đăng nhập" in text or "Đăng nhập không hợp lệ" in text:
+            clean_reason = text.replace("AUTH:", "").strip()
+            clean_reason = escape(clean_reason)
+            return (
+                "⚠️ <b>Xác thực thất bại</b>\n\n"
+                "Phản hồi từ cổng trường:\n"
+                f"<blockquote><i>\"{clean_reason}\"</i></blockquote>\n\n"
+                "👉 Bạn vui lòng kiểm tra lại tài khoản hoặc mật khẩu và bấm /login để đăng nhập lại."
+            )
+
+        if "500" in text or "sự cố kết nối nội bộ" in text:
+            return (
+                "🏫 <b>Máy chủ cổng trường gặp sự cố</b>\n\n"
+                "Hệ thống máy chủ UTH đang tạm thời mất kết nối (Mã lỗi 500). Vui lòng thử lại sau ít phút.\n\n"
+                f"<i>(Mã tra cứu: #T-{refCode})</i>"
+            )
+
+        if "bảo trì" in text or "quá tải" in text:
+            return (
+                "🏫 <b>Cổng đào tạo trường đang bảo trì</b>\n\n"
+                f"{escape(text)}\n\n"
+                f"<i>(Mã tra cứu: #T-{refCode})</i>"
+            )
+
+        if "Hết thời gian chờ" in text or "Không thể kết nối" in text:
+            return (
+                "⏳ <b>Hết thời gian chờ phản hồi</b>\n\n"
+                "Không thể kết nối đến máy chủ trường sau nhiều lần thử lại. Bạn vui lòng thử lại sau ít phút nhé!\n\n"
+                f"<i>(Mã tra cứu: #T-{refCode})</i>"
+            )
+
+        return f"{escape(text)}\n\n<i>(Mã tra cứu: #T-{refCode})</i>"
 
     def update(self, text):
-        text = f"⏳ <b>{escape(text)}</b>" + self.debugText()
+        display_text = f"⏳ <b>{escape(text)}</b>"
 
         if self.messageId is not None:
-            editTaskStatus(self.chatId, self.messageId, text)
+            editTaskStatus(self.chatId, self.messageId, display_text)
         else:
             try:
                 msg = bot.send_message(
                     self.chatId,
-                    text,
+                    display_text,
                     parse_mode="HTML",
                     disable_notification=True,
                 )
                 self.messageId = msg.message_id
             except Exception as exc:
-                log("WARN", f"Không thể gửi báo danh: {exc}")
+                log("WARN", f"Không thể gửi thông báo trạng thái: {exc}")
 
     def start(self):
         stages = {
@@ -101,18 +133,17 @@ class TaskStatus:
             f"task={self.taskSelf.request.id}",
         )
 
-    def fail(self, text="❌ Không thể hoàn tất yêu cầu.", html=False):
+    def fail(self, text="❌ Không thể hoàn tất yêu cầu.", isAuthError=False, html=False):
         self.failed = True
-        text = text if html else escape(text)
-        text += self.debugText()
+        formattedText = text if html else self.formatErrorMessage(text, isAuthError=isAuthError)
 
         if self.messageId is not None:
-            editTaskStatus(self.chatId, self.messageId, text)
+            editTaskStatus(self.chatId, self.messageId, formattedText)
         else:
             try:
                 msg = bot.send_message(
                     self.chatId,
-                    text,
+                    formattedText,
                     parse_mode="HTML",
                 )
                 self.messageId = msg.message_id
@@ -133,8 +164,9 @@ def workerStatus(taskSelf, chatId, statusMessageId=None, keepResult=False):
         log(
             "ERROR",
             f"Task={taskSelf.request.id}\n{traceback.format_exc()}",
+            exc_info=True,
         )
-        status.fail()
+        status.fail("❌ Hệ thống gặp sự cố không mong muốn khi xử lý yêu cầu.")
         raise
     else:
         if not status.failed and not keepResult and status.messageId is not None:
@@ -158,7 +190,11 @@ def portalTask(self, chatId, dateStr, statusMessageId=None):
         msg = portalService.formatCalendarMessage(chatId, dateStr)
 
         if not msg:
-            status.fail("❌ Không nhận được kết quả lịch.")
+            status.fail("❌ Không nhận được kết quả lịch học.")
+            return
+
+        if msg.startswith("❌ "):
+            status.fail(msg[2:].strip())
             return
 
         bot.send_message(chatId, msg, parse_mode="HTML", disable_web_page_preview=True)
@@ -177,7 +213,7 @@ def registrationTask(self, chatId, mssv, password, statusMessageId=None):
             resultMsg += "\n\n✅ Tuyệt vời! Bạn đã đăng ký thành công. Bây giờ bạn có thể xem lịch và deadline rồi đó."
             bot.send_message(chatId, resultMsg, parse_mode="HTML")
         else:
-            status.fail(resultMsg, html=True)
+            status.fail(resultMsg, isAuthError=True)
 
 @app.task(bind=True, name='tasks.systemStatusTask')
 def systemStatusTask(self, chatId, msgWaitId):
@@ -203,6 +239,11 @@ def portalWeekTask(self, chatId, startDateStr, statusMessageId=None):
 
         if not msg:
             status.fail("❌ Không nhận được kết quả lịch tuần.")
+            return
+
+        if msg.startswith("❌ Có lỗi xảy ra:\n") or msg.startswith("❌ "):
+            clean_err = msg.replace("❌ Có lỗi xảy ra:\n", "").replace("❌ ", "").strip()
+            status.fail(clean_err)
             return
 
         bot.send_message(chatId, msg, parse_mode="HTML", disable_web_page_preview=True)

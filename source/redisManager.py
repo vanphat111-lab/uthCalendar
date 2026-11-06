@@ -80,19 +80,31 @@ def loginAndSaveToken(chatId, user, password):
         fakeCaptcha = utils.generateFakeCaptcha()
         url = f"https://portal.ut.edu.vn/api/v1/user/login?g-recaptcha-response={fakeCaptcha}"
         r = utils.safeRequest("POST", url, json={"username": user, "password": password})
-        data = r.json()
+        if r is None:
+            log("ERROR", f"Làm mới token thất bại cho {chatId}: Không thể kết nối tới server trường")
+            return None
+
+        if r.status_code == 500:
+            log("ERROR", f"Làm mới token cho {chatId} thất bại: Server trường trả mã lỗi 500")
+            return None
+
+        try:
+            data = r.json()
+        except Exception:
+            log("ERROR", f"Server trường không trả về JSON khi refresh token ({r.status_code})")
+            return None
+
         token = data.get("token")
 
         if r.status_code == 200 and token:
             saveSession(chatId, 'portal', token, expire=7200)
-            
             log("SUCCESS", f"Đã làm mới và lưu Token thành công cho {chatId}")
             return token
             
-        log("ERROR", f"Login làm mới thất bại cho {chatId}: {data.get('message')}")
+        log("WARN", f"Login làm mới thất bại cho {chatId}: {data.get('message')}")
         return None
     except Exception as e:
-        log("ERROR", f"Lỗi nghiêm trọng trong loginAndSaveToken: {e}")
+        log("ERROR", f"Lỗi nghiêm trọng trong loginAndSaveToken: {e}", exc_info=True)
         return None
 
 def delete_all_user_data(chat_id):
