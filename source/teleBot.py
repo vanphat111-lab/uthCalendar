@@ -3,6 +3,7 @@
 # teleBot.py
 
 import os
+import html
 
 from telebot import types
 # import portalService
@@ -314,11 +315,38 @@ def processFeedback(message, bot):
     utils.cancelStepTimeout(message.chat.id)
     teleFunc.handleSendFeedback(bot, message, adminId)
 
+def updateCourceStatus(message, status_str):
+    url = next((e.url for e in (message.entities or []) if e.type == "text_link"), None)
+
+    lines = (message.text or "").split("\n")
+    title = lines[0].replace("🔔", "").strip() if lines else ""
+    safe_title = html.escape(title)
+    if url:
+        title_html = f"<a href='{url}'><b>{safe_title}</b></a>"
+    else:
+        title_html = f"<b>{safe_title}</b>"
+
+    course = ""
+    due = ""
+    for line in lines[1:]:
+        if line.startswith("📚 Môn:"):
+            course = line.replace("📚 Môn:", "").strip()
+        elif line.startswith("⏰ Hạn:"):
+            due = line.replace("⏰ Hạn:", "").strip()
+
+    return (
+        f"🔔 {title_html}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📝 <b>Trạng thái:</b> {status_str}\n"
+        f"📚 <b>Môn:</b> {html.escape(course)}\n"
+        f"⏰ <b>Hạn:</b> <code>{html.escape(due)}</code>"
+    )
+
 def handleMarkDone(bot, call):
     chatId = call.message.chat.id
     taskId = call.data.split('_')[1]
     if db.markTaskCompleted(chatId, taskId):
-        new_text = call.message.text.replace("❌ Chưa xong", "✅ Đã xong")
+        new_text = updateCourceStatus(call.message, "✅ Đã xong")
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("❌ Đánh dấu chưa xong", callback_data=f"undone_{taskId}"))
         try:
@@ -330,7 +358,7 @@ def handleMarkUndone(bot, call):
     chatId = call.message.chat.id
     taskId = call.data.split('_')[1]
     if db.unmarkTaskCompleted(chatId, taskId):
-        new_text = call.message.text.replace("✅ Đã xong", "❌ Chưa xong")
+        new_text = updateCourceStatus(call.message, "❌ Chưa xong")
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("✅ Đánh dấu hoàn thành", callback_data=f"done_{taskId}"))
         try:
